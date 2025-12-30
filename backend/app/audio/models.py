@@ -30,6 +30,10 @@ class StreamState:
     frame_count: int
     latest_confidence: Optional[float] = None
     confidence_updated_at: Optional[float] = None
+
+      # NEW: VAD/noise tracking (per stream)
+    vad_noise_floor: float = 1e-4
+    vad_hangover: int = 0
     
     def update_confidence(self, confidence: float) -> None:
         """Update the confidence score for this stream."""

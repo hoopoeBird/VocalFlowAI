@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Audio Preview MVP</title>
+</head>
+<body>
+    <button id="recordBtn">Начать запись (Микрофон)</button>
+    <button id="stopBtn" disabled>Остановить запись</button>
+    <button id="previewBtn" disabled>Preview (Прослушать улучшенный)</button>
+
+    <audio id="previewAudio" controls></audio>
+
+    <script>
+        const recordBtn = document.getElementById('recordBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const previewBtn = document.getElementById('previewBtn');
+        const previewAudio = document.getElementById('previewAudio');
+
+        let mediaRecorder;
+        let ws;
+        let audioChunks = [];  // Здесь будем собирать ВСЕ обработанные чанки от сервера
+        let isRecording = false;
+
+        const WS_URL = "ws://localhost:8000/ws/audio";  // поменяй на свой
+
+        async function startRecording() {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+            // Открываем WebSocket
+            ws = new WebSocket(WS_URL);
+
+            ws.binaryType = 'arraybuffer';
+
+            ws.onopen = () => {
+                console.log("WS connected");
+            };
+
+            ws.onmessage = (event) => {
+                if (typeof event.data === 'string') {
+                    // JSON с confidence — можно игнорировать для MVP или показать прогресс
+                    try {
+                        const data = JSON.parse(event.data);
+                        console.log("Confidence:", data.confidence);
+                    } catch (e) {}
+                } else {
+                    // Это binary — обработанный аудио-фрейм (PCM)
+                    // Просто собираем все чанки в массив
+                    event.data.arrayBuffer().then(buffer => {
+                        audioChunks.push(buffer);
+                    });
+                }
+            };
+
+            ws.onclose = () => {
+                console.log("WS closed");
+            };
+
+            // MediaRecorder для захвата с микрофона
+            mediaRecorder = new MediaRecorder(stream, {
+                mimeType: 'audio/webm'  // но нам нужны raw PCM, поэтому лучше вручную
+            });
+
+            // Лучше использовать AudioContext для raw PCM 16-bit 16kHz или как у тебя на сервере
+            const audioContext = new AudioContext({ sampleRate: 16000 });  // подгони под свой сервер!
+            const source = audioContext.createMediaStreamSource(stream);
+            const processor = audioContext.createScriptProcessor(4096, 1, 1);  // буфер 4096 сэмплов
+
+            processor.onaudioprocess = (e) => {
+    if (!isRecording || ws.readyState !== WebSocket.OPEN) return;
+
+    const inputData = e.inputBuffer.getChannelData(0);  // float32 [-1.0, 1.0]
+
+    // Создаём буфер int16 напрямую и правильно
+    const buffer = new ArrayBuffer(inputData.length * 2);
+    const view = new DataView(buffer);
+    let offset = 0;
+
+    for (let i = 0; i < inputData.length; i++) {
+        let s = Math.max(-1, Math.min(1, inputData[i]));
+        let sample = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        view.setInt16(offset, sample, true);  // little-endian
+        offset += 2;
+    }
+
+    ws.send(buffer);
+};
+            source.connect(processor);
+            processor.connect(audioContext.destination);  // можно отключить, если не хочешь слышать исходный
+
+            isRecording = true;
+            recordBtn.disabled = true;
+            stopBtn.disabled = false;
+            previewBtn.disabled = true;
+            audioChunks = [];  // очищаем предыдущее
+        }
+
+        function stopRecording() {
+            isRecording = false;
+            ws.close();
+            stopBtn.disabled = true;
+            recordBtn.disabled = false;
+            previewBtn.disabled = false;
+        }
+
+        async function playPreview() {
+            if (audioChunks.length === 0) return;
+
+            // Склеиваем все полученные буферы в один большой ArrayBuffer
+            const totalLength = audioChunks.reduce((acc, chunk) => acc + chunk.byteLength, 0);
+            const combined = new Uint8Array(totalLength);
+            let offset = 0;
+            for (const chunk of audioChunks) {
+                combined.set(new Uint8Array(chunk), offset);
+                offset += chunk.byteLength;
+            }
+
+            // Создаём Blob и URL для <audio>
+            const blob = new Blob([combined], { type: 'audio/wav' });  // или 'audio/pcm' но браузер лучше понимает wav
+            // Чтобы wav был валидный, нужно добавить заголовок — простой способ ниже
+
+            const wavBlob = createWavBlob(combined.buffer);  // см. функцию ниже
+            previewAudio.src = URL.createObjectURL(wavBlob);
+            previewAudio.play();
+        }
+
+        // Простая функция для добавления WAV-заголовка (16kHz, mono, 16-bit)
+        function createWavBlob(pcmData) {
+            const sampleRate = 16000;
+            const buffer = new ArrayBuffer(44 + pcmData.byteLength);
+            const view = new DataView(buffer);
+
+            // RIFF header
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + pcmData.byteLength, true);
+            writeString(view, 8, 'WAVE');
+
+            // fmt subchunk
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);     // PCM
+            view.setUint16(22, 1, true);     // mono
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true);  // byte rate
+            view.setUint16(32, 2, true);     // block align
+            view.setUint16(34, 16, true);    // bits per sample
+
+            // data subchunk
+            writeString(view, 36, 'data');
+            view.setUint32(40, pcmData.byteLength, true);
+
+            // PCM data
+            const uint8 = new Uint8Array(buffer);
+            uint8.set(new Uint8Array(pcmData), 44);
+
+            return new Blob([uint8], { type: 'audio/wav' });
+        }
+
+        function writeString(view, offset, string) {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
+        }
+
+        recordBtn.onclick = startRecording;
+        stopBtn.onclick = stopRecording;
+        previewBtn.onclick = playPreview;
+    </script>
+</body>
+</html>

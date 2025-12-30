@@ -11,8 +11,11 @@ from app.audio.ml.enhancement import enhance_voice_ml
 from app.core.config import settings
 from app.core.logging import logger
 
+from app.audio.models import AudioFrame, StreamState   # NEW
+from app.audio.dsp.vad import vad_speech_ratio         # NEW
 
-def process_audio_frame(frame: AudioFrame, confidence: Optional[float] = None) -> AudioFrame:
+
+def process_audio_frame(frame: AudioFrame, confidence: Optional[float] = None,stream_state: Optional[StreamState] = None ) -> AudioFrame:
     """
     Process a single audio frame through the DSP and ML pipeline.
     

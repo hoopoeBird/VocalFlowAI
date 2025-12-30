@@ -156,4 +156,3 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
             await websocket.close()
         except:
             pass
-
