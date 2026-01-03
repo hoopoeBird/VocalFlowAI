@@ -10,7 +10,7 @@ Fully browser-based (React + Vite)
 Backend built with FastAPI and WebSocket for real-time processing
 
 🚀 Live Demo
-Live version: https://trustvoice-ai.vercel.app (replace with your actual Vercel link after deployment)
+Live version: https://trust-voice-ai.vercel.app
 Backend API docs: https://vocalflowai-production.up.railway.app/docs (Swagger UI)
 🛠 Tech Stack
 Frontend:
