@@ -135,7 +135,7 @@ async def process_stream(stream_id: str, websocket: WebSocket) -> None:
                         "timestamp": frame.timestamp,
                         "stream_id": stream_id
                     }
-                    
+
                     # Phase 3: Add feature summary for debugging/analysis
                     if features:
                         confidence_response["features"] = {
@@ -145,16 +145,21 @@ async def process_stream(stream_id: str, websocket: WebSocket) -> None:
                             "spectral_centroid": round(features.get("spectral_centroid_mean", 0), 1),
                             "zcr": round(features.get("zcr_mean", 0), 3)
                         }
-                    
+
                     await websocket.send_json(confidence_response)
-                
+
                 # Step 2: Always send processed audio frame as binary
                 # This ensures real-time audio streaming with minimal latency
                 processed_audio_bytes = frame_to_bytes(processed_frame)
                 await websocket.send_bytes(processed_audio_bytes)
-                
+
             except Exception as e:
-                logger.error(f"Error sending response for stream {stream_id}: {e}")
+                # More specific error handling for different types of WebSocket errors
+                error_msg = str(e).lower()
+                if "connection" in error_msg or "close" in error_msg or "disconnect" in error_msg:
+                    logger.info(f"WebSocket connection closed for stream {stream_id}: {e}")
+                else:
+                    logger.error(f"Error sending response for stream {stream_id}: {e}")
                 break
             
     except WebSocketDisconnect:
@@ -197,21 +202,32 @@ async def process_stream(stream_id: str, websocket: WebSocket) -> None:
 async def websocket_audio_endpoint(websocket: WebSocket) -> None:
     """
     WebSocket endpoint handler for /ws/audio.
-    
+
     Accepts binary PCM audio frames and sends JSON confidence updates.
     """
-    await websocket.accept()
-    
     # Generate unique stream ID
     stream_id = f"ws-{uuid.uuid4().hex[:8]}"
-    logger.info(f"New WebSocket connection: {stream_id}")
-    
+
     try:
+        await websocket.accept()
+        logger.info(f"New WebSocket connection: {stream_id}")
+
         await process_stream(stream_id, websocket)
+
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected: {stream_id}")
     except Exception as e:
         logger.error(f"WebSocket error for {stream_id}: {e}")
+        # Try to send error message if connection is still open
+        try:
+            await websocket.send_json({
+                "error": "Internal server error",
+                "stream_id": stream_id
+            })
+        except:
+            pass  # Connection already closed
     finally:
         try:
             await websocket.close()
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Error closing WebSocket for {stream_id}: {e}")

@@ -2,7 +2,11 @@
 
 import { useRef, useState } from "react";
 
+<<<<<<< HEAD
 // const WS_URL = "ws://localhost:8000/ws/audio";
+=======
+// const WS_URL = "ws://localhost:8001/ws/audio";
+>>>>>>> e5e29a6 (buffer error fix)
 const WS_URL = "wss://vocalflowai-production.up.railway.app/ws/audio";
 const SAMPLE_RATE = 16000;
 const FRAME_SAMPLES = 320; // 20ms при 16kHz

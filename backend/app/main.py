@@ -41,18 +41,27 @@ async def startup_event():
     """Initialize on startup."""
     from app.core.logging import logger
     from app.audio.ml.enhancement import load_enhancement_model
-    
-    logger.info(f"Starting AI Voice Confidence Backend on {settings.host}:{settings.port}")
+    import os
+
+    # Log Railway deployment info
+    port = os.getenv("PORT", settings.port)
+    logger.info(f"Starting AI Voice Confidence Backend on {settings.host}:{port}")
+    logger.info(f"Environment: Railway={bool(os.getenv('RAILWAY_ENVIRONMENT'))}, PORT={port}")
     logger.info(f"Sample rate: {settings.sample_rate} Hz, Frame size: {settings.frame_size_ms} ms")
-    
+
     # Phase 3: Initialize ML enhancement model if enabled
     if settings.enable_ml_enhancement:
         logger.info("ML enhancement enabled, loading ONNX model...")
-        model = load_enhancement_model()
-        if model is not None:
-            logger.info("✓ ML enhancement model loaded successfully")
-        else:
-            logger.warning("⚠ ML enhancement enabled but model not available, will use DSP-only processing")
+        try:
+            model = load_enhancement_model()
+            if model is not None:
+                logger.info("✓ ML enhancement model loaded successfully")
+            else:
+                logger.warning("⚠ ML enhancement enabled but model not available, will use DSP-only processing")
+        except Exception as e:
+            logger.error(f"⚠ Failed to load ML enhancement model: {e}, falling back to DSP-only processing")
+            # Disable ML enhancement if loading fails
+            settings.enable_ml_enhancement = False
     else:
         logger.info("ML enhancement disabled (set ENABLE_ML_ENHANCEMENT=true to enable)")
 
