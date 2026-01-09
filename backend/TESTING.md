@@ -84,6 +84,88 @@ curl http://localhost:8000/health
 curl http://localhost:8000/streams/STREAM_ID/confidence
 ```
 
+## Audio Processing Endpoint (REST API)
+
+Process audio buffers and get confidence scores + processed audio via HTTP POST:
+
+```bash
+# Send audio file for processing and get confidence + processed audio
+curl -X POST \
+  -F "file=@audio.wav" \
+  http://localhost:8000/streams/my-stream-id/confidence
+```
+
+### Response Format
+
+```json
+{
+  "stream_id": "my-stream-id",
+  "confidence": 85.3,
+  "timestamp": 1234567890.123,
+  "processed_audio_b64": "AAAAAAAAAAAAAAAAAAAw...",
+  "audio_size_bytes": 640
+}
+```
+
+### Parameters
+
+- **stream_id** (path): Unique identifier for this processing session
+- **file** (form): Binary audio file (PCM int16, 16kHz, mono)
+
+### Return Values
+
+- **confidence**: Confidence score from 0-100%
+- **processed_audio_b64**: Base64-encoded processed audio (can be decoded back to binary)
+- **audio_size_bytes**: Size of the processed audio in bytes
+- **timestamp**: Frame timestamp
+
+### Python Example
+
+```python
+import requests
+import base64
+
+# Send audio file
+with open("audio.wav", "rb") as f:
+    response = requests.post(
+        "http://localhost:8000/streams/my-stream/confidence",
+        files={"file": f}
+    )
+
+data = response.json()
+confidence = data["confidence"]
+processed_audio = base64.b64decode(data["processed_audio_b64"])
+
+print(f"Confidence: {confidence}%")
+print(f"Processed audio size: {data['audio_size_bytes']} bytes")
+
+# Save processed audio
+with open("processed_audio.wav", "wb") as f:
+    f.write(processed_audio)
+```
+
+### JavaScript Example
+
+```javascript
+const formData = new FormData();
+formData.append('file', audioBlob);
+
+const response = await fetch('http://localhost:8000/streams/my-stream/confidence', {
+  method: 'POST',
+  body: formData
+});
+
+const data = await response.json();
+console.log(`Confidence: ${data.confidence}%`);
+
+// Decode base64 audio
+const binaryString = atob(data.processed_audio_b64);
+const bytes = new Uint8Array(binaryString.length);
+for (let i = 0; i < binaryString.length; i++) {
+  bytes[i] = binaryString.charCodeAt(i);
+}
+```
+
 ## WebSocket Testing with wscat (Optional)
 
 If you have `wscat` installed:
