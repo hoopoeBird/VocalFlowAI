@@ -48,6 +48,89 @@ Example output:
 [████████████████████████████████████████████████░░░░] Confidence:  85.3% | Stream: ws-abc12345
 ```
 
+### Alternative: Endpoint Test Client (REST API - No Microphone Required)
+
+For testing without a microphone, use the endpoint test client:
+
+```bash
+cd backend
+python test_client_endpoint.py
+```
+
+This test client:
+- **Generates 3 test audio files** (silence, 1000 Hz tone, white noise)
+- **Tests the POST `/streams/{stream_id}/confidence` endpoint** with each audio file
+- **Validates** confidence scores, response format, and base64 audio decoding
+- **Saves processed audio** for inspection
+- **Reports pass/fail** for each test
+
+#### Expected Output
+
+```
+======================================================================
+AI Voice Confidence Backend - Endpoint Test Client
+======================================================================
+
+[1/4] Checking server health...
+✓ Server is healthy
+  Status: ok
+  Version: 0.1.0
+
+[2/4] Generating test audio files...
+✓ Generated test_silence.wav (32044 bytes)
+✓ Generated test_tone.wav (32044 bytes)
+✓ Generated test_noise.wav (32044 bytes)
+
+[3/4] Running endpoint tests...
+
+======================================================================
+Testing: Silence (no audio)
+======================================================================
+✓ Response received
+  Stream ID: silence-test
+  Confidence: 25.3%
+  Audio size: 640 bytes
+✓ Confidence in valid range [0-100]
+✓ Processed audio decoded: 640 bytes
+✓ Saved processed audio to: processed_silence-test.wav
+✓ Test PASSED
+
+======================================================================
+Testing: 1000 Hz Sine Wave Tone
+======================================================================
+✓ Response received
+  Stream ID: tone-test
+  Confidence: 72.1%
+  Audio size: 640 bytes
+✓ Confidence in valid range [0-100]
+✓ Processed audio decoded: 640 bytes
+✓ Saved processed audio to: processed_tone-test.wav
+✓ Test PASSED
+
+======================================================================
+Testing: White Noise
+======================================================================
+✓ Response received
+  Stream ID: noise-test
+  Confidence: 65.8%
+  Audio size: 640 bytes
+✓ Confidence in valid range [0-100]
+✓ Processed audio decoded: 640 bytes
+✓ Saved processed audio to: processed_noise-test.wav
+✓ Test PASSED
+
+[4/4] Test Summary
+======================================================================
+✓ PASS: Silence (no audio)
+✓ PASS: 1000 Hz Sine Wave Tone
+✓ PASS: White Noise
+
+Total: 3/3 tests passed
+======================================================================
+
+✓ All tests PASSED!
+```
+
 ## Troubleshooting
 
 ### No Audio Input
@@ -56,6 +139,7 @@ If you get errors about audio devices:
 1. Check that your microphone is connected and working
 2. List available audio devices: `python -c "import sounddevice as sd; print(sd.query_devices())"`
 3. You may need to specify a device in the test client
+4. Try the endpoint test client instead: `python test_client_endpoint.py`
 
 ### Connection Errors
 
