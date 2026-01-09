@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 
-// const WS_URL = "ws://localhost:8001/ws/audio";
+// const WS_URL = "ws://localhost:8000/ws/audio";
 
 const WS_URL = "wss://vocalflowai-production.up.railway.app/ws/audio";
 const SAMPLE_RATE = 16000;
