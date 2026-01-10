@@ -57,22 +57,19 @@ export default function VoiceBoost({ data }) {
 
         {/* START / STOP */}
         <button
-  type="button"
-  onClick={() => {
-    console.log("BTN CLICK", status);
-
-    if (status === "idle") {
-      start();
-    } else {
-      stop();
-    }
-  }}
-  disabled={status === "starting" && status === "idle"}
-  className="relative z-50 cursor-pointer w-64 h-16 lg:w-80 lg:h-20 rounded-[67px] font-serif text-3xl tracking-wider font-medium text-white bg-gradient-to-r from-[#4facfe] to-[#00f2fe] shadow-xl shadow-blue-500/50 hover:scale-105 transition disabled:opacity-60 disabled:hover:scale-100"
->
-  {status === "idle" ? data.buttonName : "Stop"}
-</button>
-
+          type="button"
+          onClick={() => {
+            if (status === "idle") {
+              start();
+            } else {
+              stop();
+            }
+          }}
+          disabled={status === "starting" || status === "stopping"}
+          className="relative z-50 cursor-pointer w-64 h-16 lg:w-80 lg:h-20 rounded-[67px] font-serif text-3xl tracking-wider font-medium text-white bg-gradient-to-r from-[#4facfe] to-[#00f2fe] shadow-xl shadow-blue-500/50 hover:scale-105 transition disabled:opacity-60 disabled:hover:scale-100"
+        >
+          {status === "idle" ? data.buttonName : "Stop"}
+        </button>
 
         {/* <div className="flex flex-col gap-y-7">
           <p className="font-serif text-2xl font-thin tracking-wider text-center">
