@@ -1,6 +1,6 @@
 // Fro  tend/src/components/useVoiceStream.js
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect, useCallback } from "react";
 
 // const WS_URL = "ws://localhost:8000/ws/audio";
 
@@ -21,6 +21,93 @@ export function useVoiceStream() {
   const accumulatedInput = useRef([]); // для отправки на сервер
   const enhancedChunks = useRef([]); // собираем улучшенный звук от сервера
 
+  // NEW: device state & UI helpers
+  const [audioInputs, setAudioInputs] = useState([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState(null);
+  const [deviceMessage, setDeviceMessage] = useState("");
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const refreshDevices = useCallback(async () => {
+    console.debug("[useVoiceStream] refreshDevices");
+    setIsRefreshing(true);
+    setDeviceMessage("Refreshing devices...");
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+      setAudioInputs([]);
+      setDeviceMessage("Device enumeration not available in this browser/context.");
+      setIsRefreshing(false);
+      return;
+    }
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const inputs = devices.filter((d) => d.kind === "audioinput");
+      setAudioInputs(inputs);
+      if (!selectedDeviceId && inputs.length > 0) setSelectedDeviceId(inputs[0].deviceId);
+      if (inputs.length === 0) {
+        setDeviceMessage("No microphone found. Use your host browser and ensure a mic is connected.");
+      } else if (inputs.every((d) => !d.label)) {
+        setDeviceMessage("Microphones found but labels hidden. Click 'Test permission' to prompt for microphone access.");
+      } else {
+        setDeviceMessage("");
+      }
+      console.debug("[useVoiceStream] devices:", inputs);
+    } catch (e) {
+      console.error("[useVoiceStream] refreshDevices error", e);
+      setAudioInputs([]);
+      setDeviceMessage("Error enumerating devices. See console for details.");
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [selectedDeviceId]);
+
+  const testPermissions = useCallback(async () => {
+    console.debug("[useVoiceStream] testPermissions");
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      const msg = "getUserMedia not available. Use HTTPS or localhost.";
+      setDeviceMessage(msg);
+      return;
+    }
+    setIsRefreshing(true);
+    setDeviceMessage("Requesting microphone permission...");
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+      s.getTracks().forEach((t) => t.stop());
+      setDeviceMessage("Permission granted. Refreshing device list...");
+      await refreshDevices();
+    } catch (e) {
+      console.error("[useVoiceStream] testPermissions error", e);
+      if (e && e.name === "NotAllowedError") {
+        setDeviceMessage("Microphone access denied. Allow microphone permissions in browser settings.");
+      } else if (e && (e.name === "NotFoundError" || e.name === "DevicesNotFoundError")) {
+        setDeviceMessage("Requested device not found. Connect a microphone and try again.");
+      } else {
+        setDeviceMessage("Permission request failed. See console for details.");
+      }
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [refreshDevices]);
+
+  useEffect(() => {
+    // auto-refresh and listen for device changes
+    refreshDevices();
+    const onChange = () => {
+      console.debug("[useVoiceStream] devicechange detected");
+      refreshDevices();
+    };
+    if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+      navigator.mediaDevices.addEventListener("devicechange", onChange);
+      return () => navigator.mediaDevices.removeEventListener("devicechange", onChange);
+    }
+    if (navigator.mediaDevices) {
+      navigator.mediaDevices.ondevicechange = onChange;
+      return () => {
+        try { navigator.mediaDevices.ondevicechange = null; } catch {}
+      };
+    }
+    return undefined;
+  }, [refreshDevices]);
+
+  // Adjusted start() to use selectedDeviceId and better errors
   const start = async () => {
     try { 
       setStatus("recording");
@@ -28,7 +115,37 @@ export function useVoiceStream() {
       accumulatedInput.current = [];
       enhancedChunks.current = [];
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Check devices and constraints
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const inputs = devices.filter((d) => d.kind === "audioinput");
+      setAudioInputs(inputs);
+      if (inputs.length === 0) {
+        setDeviceMessage("No microphone device found. Connect a microphone and retry.");
+        setStatus("idle");
+        return;
+      }
+
+      const deviceIdToUse = selectedDeviceId || (inputs[0] && inputs[0].deviceId);
+      const constraints = deviceIdToUse ? { audio: { deviceId: { exact: deviceIdToUse } } } : { audio: true };
+
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (e) {
+        console.error("[useVoiceStream] getUserMedia error", e);
+        if (e && (e.name === "NotFoundError" || e.name === "DevicesNotFoundError")) {
+          setDeviceMessage("Requested audio device not found. Connect a microphone or choose a different device.");
+          setStatus("idle");
+          return;
+        }
+        if (e && e.name === "NotAllowedError") {
+          setDeviceMessage("Microphone access denied. Allow microphone permissions in your browser.");
+          setStatus("idle");
+          return;
+        }
+        throw e;
+      }
+
       streamRef.current = stream;
 
       const audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
@@ -153,5 +270,19 @@ export function useVoiceStream() {
     setPreviewUrl(URL.createObjectURL(blob));
   };
 
-  return { status, previewUrl, start, stop, makePreview };
+  return {
+    status,
+    previewUrl,
+    start,
+    stop,
+    makePreview,
+    // NEW exports for device UI
+    audioInputs,
+    selectedDeviceId,
+    selectDevice: (id) => setSelectedDeviceId(id),
+    refreshDevices,
+    testPermissions,
+    deviceMessage,
+    isRefreshing,
+  };
 }

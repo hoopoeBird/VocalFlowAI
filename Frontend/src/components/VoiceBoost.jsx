@@ -4,7 +4,19 @@ import { Link } from "react-router-dom";
 import { useVoiceStream } from "./useVoiceStream";
 
 export default function VoiceBoost({ data }) {
-  const { status, previewUrl, start, stop, makePreview } = useVoiceStream();
+  const {
+    status,
+    previewUrl,
+    start,
+    stop,
+    makePreview,
+    audioInputs,
+    selectedDeviceId,
+    selectDevice,
+    refreshDevices,
+    deviceMessage,
+    testPermissions,
+  } = useVoiceStream();
   const isIdle = status === "idle";
 
   return (
@@ -55,10 +67,55 @@ export default function VoiceBoost({ data }) {
           />
         </div>
 
+        {/* device selector */}
+        <div className="mt-4 flex items-center gap-x-3 relative z-50 pointer-events-auto">
+          {audioInputs && audioInputs.length > 0 ? (
+            <>
+              <select
+                value={selectedDeviceId || ""}
+                onChange={(e) => selectDevice(e.target.value)}
+                className="rounded px-2 py-1 text-black"
+              >
+                {audioInputs.map((d) => (
+                  <option key={d.deviceId} value={d.deviceId}>
+                    {d.label || `Microphone ${d.deviceId}`}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={refreshDevices}
+                className="text-sm px-3 py-1 bg-white/20 rounded pointer-events-auto ml-2"
+              >
+                Refresh
+              </button>
+            </>
+          ) : (
+            <div className="text-sm text-white/80">
+              {deviceMessage || "No microphone detected."}{" "}
+              <button
+                onClick={refreshDevices}
+                className="underline ml-2 pointer-events-auto"
+                type="button"
+              >
+                Refresh
+              </button>
+              <button
+                onClick={testPermissions}
+                className="ml-3 px-3 py-1 bg-white/20 rounded text-sm pointer-events-auto"
+                type="button"
+              >
+                Test permission
+              </button>
+            </div>
+          )}
+        </div>
+
         {/* START / STOP */}
         <button
           type="button"
           onClick={() => {
+            console.debug("VoiceBoost button clicked, status=", status);
             if (status === "idle") {
               start();
             } else {
@@ -70,6 +127,9 @@ export default function VoiceBoost({ data }) {
         >
           {status === "idle" ? data.buttonName : "Stop"}
         </button>
+
+        {/* status indicator */}
+        <p className="mt-3 text-white/90">{`status: ${status}`}</p>
 
         {/* <div className="flex flex-col gap-y-7">
           <p className="font-serif text-2xl font-thin tracking-wider text-center">
@@ -90,7 +150,6 @@ export default function VoiceBoost({ data }) {
           type="button"
           onClick={makePreview}
           disabled={status === "running" || status === "starting"}
-
           className="relative z-50 font-serif font-medium text-2xl tracking-wider w-48 h-16 bg-gradient-to-r from-white/20 to-white/55 rounded-[67px] cursor-pointer shadow-lg shadow-black disabled:opacity-50"
           title={!isIdle ? "Stop first to preview" : ""}
         >

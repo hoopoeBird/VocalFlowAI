@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 
 const SERVER = (typeof window !== "undefined" && window.location && `${window.location.protocol}//${window.location.hostname}:8000`) || "http://localhost:8000";
 const TARGET_SAMPLE_RATE = 16000;
@@ -39,6 +39,9 @@ function floatTo16BitPCM(float32Array) {
 export function useVoiceStream() {
   const [status, setStatus] = useState("idle"); // idle, starting, running, stopping
   const [previewUrl, setPreviewUrl] = useState(null);
+  const [audioInputs, setAudioInputs] = useState([]); // list of available microphones
+  const [selectedDeviceId, setSelectedDeviceId] = useState(null);
+  const [deviceMessage, setDeviceMessage] = useState(""); // helpful guidance for the user
   const audioCtxRef = useRef(null);
   const mediaStreamRef = useRef(null);
   const processorRef = useRef(null);
@@ -46,11 +49,122 @@ export function useVoiceStream() {
   const fetchAbortRef = useRef(null);
   const fetchPromiseRef = useRef(null);
 
+  async function refreshDevices() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+      console.warn("[useVoiceStream] enumerateDevices not available");
+      setAudioInputs([]);
+      setDeviceMessage("Device enumeration not available in this browser/context.");
+      return;
+    }
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const inputs = devices.filter((d) => d.kind === "audioinput");
+      setAudioInputs(inputs);
+      if (!selectedDeviceId && inputs.length > 0) {
+        setSelectedDeviceId(inputs[0].deviceId);
+      }
+      // If devices exist but labels are empty, ask for permission to reveal labels
+      if (inputs.length === 0) {
+        setDeviceMessage("No microphone found. If you're in a container/VM, use your host browser and ensure a mic is connected.");
+      } else if (inputs.every((d) => !d.label)) {
+        setDeviceMessage("Microphones found but labels hidden. Click 'Test permission' to prompt for microphone access.");
+      } else {
+        setDeviceMessage("");
+      }
+      console.debug("[useVoiceStream] devices refreshed", inputs);
+    } catch (e) {
+      console.error("[useVoiceStream] refreshDevices error", e);
+      setAudioInputs([]);
+      setDeviceMessage("Error enumerating devices. See console for details.");
+    }
+  }
+
+  async function testPermissions() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      const msg = "getUserMedia is not available in this browser / context. Use HTTPS or localhost.";
+      console.error("[useVoiceStream] " + msg);
+      setDeviceMessage(msg);
+      return;
+    }
+    try {
+      // prompt permission and immediately close the stream
+      const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+      s.getTracks().forEach((t) => t.stop());
+      setDeviceMessage("Permission granted. Refreshing device list...");
+      await refreshDevices();
+    } catch (e) {
+      console.error("[useVoiceStream] testPermissions error", e);
+      if (e && e.name === "NotAllowedError") {
+        setDeviceMessage("Microphone access denied. Allow microphone permissions in your browser settings.");
+      } else if (e && (e.name === "NotFoundError" || e.name === "DevicesNotFoundError")) {
+        setDeviceMessage("Requested device not found. Connect a microphone and try again.");
+      } else {
+        setDeviceMessage("Permission request failed. See console for details.");
+      }
+    }
+  }
+
+  useEffect(() => {
+    // initial device refresh + listen for device changes
+    refreshDevices();
+    const onChange = () => refreshDevices();
+    if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+      navigator.mediaDevices.addEventListener("devicechange", onChange);
+      return () => navigator.mediaDevices.removeEventListener("devicechange", onChange);
+    }
+    return undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function start() {
-    if (status !== "idle") return;
+    console.debug("[useVoiceStream] start() called, status=", status);
+    if (status !== "idle") {
+      console.debug("[useVoiceStream] start aborted, not idle");
+      return;
+    }
     setStatus("starting");
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        const msg = "getUserMedia is not available in this browser / context. Use HTTPS or localhost.";
+        console.error("[useVoiceStream] " + msg);
+        alert(msg);
+        setStatus("idle");
+        return;
+      }
+
+      // enumerate devices and check availability
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const inputs = devices.filter((d) => d.kind === "audioinput");
+      setAudioInputs(inputs);
+      if (inputs.length === 0) {
+        const msg = "No microphone device found. Connect a microphone and retry.";
+        console.error("[useVoiceStream] " + msg);
+        alert(msg);
+        setStatus("idle");
+        return;
+      }
+
+      const deviceIdToUse = selectedDeviceId || (inputs[0] && inputs[0].deviceId);
+      const constraints = deviceIdToUse ? { audio: { deviceId: { exact: deviceIdToUse } } } : { audio: true };
+
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (e) {
+        if (e && (e.name === "NotFoundError" || e.name === "DevicesNotFoundError")) {
+          alert("Requested audio device not found. Connect a microphone or choose a different device.");
+          setStatus("idle");
+          return;
+        }
+        if (e && e.name === "NotAllowedError") {
+          alert("Microphone access denied. Allow microphone permissions in your browser.");
+          setStatus("idle");
+          return;
+        }
+        throw e;
+      }
+
+      console.debug("[useVoiceStream] obtained media stream", stream);
       mediaStreamRef.current = stream;
       const ac = new (window.AudioContext || window.webkitAudioContext)();
       audioCtxRef.current = ac;
@@ -119,12 +233,14 @@ export function useVoiceStream() {
       processor.connect(ac.destination);
       setStatus("running");
     } catch (e) {
-      console.error("start error", e);
+      console.error("[useVoiceStream] start error", e);
+      alert("Unable to access microphone. Check permissions and secure context (HTTPS or localhost). See console for details.");
       setStatus("idle");
     }
   }
 
   async function stop() {
+    console.debug("[useVoiceStream] stop() called, status=", status);
     if (status !== "running") return;
     setStatus("stopping");
     try {
@@ -166,6 +282,7 @@ export function useVoiceStream() {
   }
 
   async function makePreview(durationMs = 1000) {
+    console.debug("[useVoiceStream] makePreview() called, status=", status);
     if (status !== "idle") return; // avoid clashing with running stream
     setStatus("starting");
     let localStream = null;
@@ -236,6 +353,12 @@ export function useVoiceStream() {
     start,
     stop,
     makePreview,
+    audioInputs,
+    selectedDeviceId,
+    selectDevice: (id) => setSelectedDeviceId(id),
+    refreshDevices,
+    testPermissions,
+    deviceMessage,
   };
 }
 
