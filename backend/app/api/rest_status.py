@@ -1,5 +1,5 @@
 """REST endpoints for health and status."""
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Request
 from datetime import datetime
 from app.services.confidence_service import confidence_service
 from app.audio.buffers import buffer_manager
@@ -75,26 +75,42 @@ async def get_stream_confidence(stream_id: str):
 
 
 @router.post("/streams/{stream_id}/confidence")
-async def process_audio_and_get_confidence(stream_id: str, file: UploadFile = File(...)):
+async def process_audio_and_get_confidence(stream_id: str, request: Request, file: UploadFile = File(None)):
     """
     Process audio buffer and return confidence score + processed audio.
     
-    Accepts binary PCM audio (int16, 16kHz, mono).
+    Accepts:
+      - binary PCM audio (int16, 16kHz, mono) sent as application/octet-stream (recommended for continuous buffers)
+      - or multipart/form-data with a file (kept for backward compatibility)
     
     Args:
         stream_id: Stream identifier
-        file: Binary audio file (PCM int16)
+        request: FastAPI Request object (used to read streaming body)
+        file: Optional uploaded file (multipart)
         
     Returns:
         JSON with confidence score and base64-encoded processed audio
     """
     try:
-        # Read audio data from file
-        audio_bytes = await file.read()
-        
-        # Convert bytes to numpy array (int16)
-        audio_data = np.frombuffer(audio_bytes, dtype=np.int16)
-        
+        content_type = request.headers.get("content-type", "")
+        # Read audio bytes either from UploadFile (multipart) or the streamed body
+        if file is not None:
+            audio_bytes = await file.read()
+        elif "multipart/form-data" in content_type:
+            # multipart was used but no file provided
+            raise HTTPException(status_code=400, detail="No file uploaded in multipart/form-data request")
+        else:
+            # Read raw/streamed body in chunks (supports chunked transfer / streaming uploads)
+            chunks = []
+            total = 0
+            max_size = 10 * 1024 * 1024  # 10 MB safety cap
+            async for chunk in request.stream():
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > max_size:
+                    raise HTTPException(status_code=413, detail="Payload too large")
+            audio_bytes = b"".join(chunks)
+
         # Convert to AudioFrame
         frame = bytes_to_audio_frame(audio_bytes, stream_id)
         
@@ -130,6 +146,8 @@ async def process_audio_and_get_confidence(stream_id: str, file: UploadFile = Fi
     except ValueError as e:
         logger.error(f"Invalid audio data for stream {stream_id}: {e}")
         raise HTTPException(status_code=400, detail=f"Invalid audio data: {str(e)}")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error processing audio for stream {stream_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Error processing audio: {str(e)}")

@@ -12,6 +12,7 @@ import numpy as np
 import wave
 import sys
 import json
+import time
 from pathlib import Path
 
 # Configuration
@@ -60,17 +61,11 @@ def generate_noise(filename, duration=1, amplitude=8000):
     return filename
 
 
-def test_endpoint(stream_id, audio_file, description=""):
+def test_endpoint(stream_id, audio_file, description="", stream_chunks=False):
     """
     Test the POST /streams/{stream_id}/confidence endpoint.
-    
-    Args:
-        stream_id: Unique stream identifier
-        audio_file: Path to audio file to test
-        description: Description of the test
-        
-    Returns:
-        True if test passed, False otherwise
+
+    If stream_chunks=True, the audio will be sent in small chunks to emulate a real-time continuous buffer.
     """
     print(f"\n{'=' * 70}")
     print(f"Testing: {description}")
@@ -80,11 +75,31 @@ def test_endpoint(stream_id, audio_file, description=""):
     print(f"Server: {SERVER_URL}")
     
     try:
-        # Open and send audio file
-        with open(audio_file, "rb") as f:
+        # Read raw PCM frames from the WAV file
+        with wave.open(audio_file, "rb") as w:
+            frames = w.readframes(w.getnframes())
+        
+        headers = {'Content-Type': 'application/octet-stream'}
+        if stream_chunks:
+            # Send chunked/streamed upload to emulate continuous real-time audio
+            chunk_size = 2048
+            def gen():
+                for i in range(0, len(frames), chunk_size):
+                    yield frames[i:i+chunk_size]
+                    time.sleep(0.01)  # small delay to simulate real-time
+            headers['Transfer-Encoding'] = 'chunked'
             response = requests.post(
                 f"{SERVER_URL}/streams/{stream_id}/confidence",
-                files={"file": f},
+                data=gen(),
+                headers=headers,
+                timeout=30
+            )
+        else:
+            # Send the entire raw PCM buffer in one request
+            response = requests.post(
+                f"{SERVER_URL}/streams/{stream_id}/confidence",
+                data=frames,
+                headers=headers,
                 timeout=10
             )
         
@@ -202,14 +217,15 @@ def main():
     print("\n[3/4] Running endpoint tests...")
     
     tests = [
-        ("silence-test", "test_silence.wav", "Silence (no audio)"),
-        ("tone-test", "test_tone.wav", "1000 Hz Sine Wave Tone"),
-        ("noise-test", "test_noise.wav", "White Noise"),
+        ("silence-test", "test_silence.wav", "Silence (no audio)", False),
+        ("tone-test", "test_tone.wav", "1000 Hz Sine Wave Tone", False),
+        ("noise-test", "test_noise.wav", "White Noise", False),
+        ("streaming-tone", "test_tone.wav", "Streamed 1000 Hz Tone (chunked upload)", True),
     ]
     
     results = []
-    for stream_id, audio_file, description in tests:
-        passed = test_endpoint(stream_id, audio_file, description)
+    for stream_id, audio_file, description, stream_chunks in tests:
+        passed = test_endpoint(stream_id, audio_file, description, stream_chunks=stream_chunks)
         results.append((description, passed))
     
     # Summary
